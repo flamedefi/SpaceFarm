@@ -1,0 +1,32 @@
+{
+  "name": "flame",
+  "version": "0.0.1",
+  "dependencies": {
+    "@taquito/michelson-encoder": "^8.1.1",
+    "@taquito/rpc": "^9.0.0",
+    "@taquito/signer": "^8.1.1",
+    "@taquito/taquito": "^9.0.0",
+    "assert": "^2.0.0",
+    "dotenv": "^8.2.0",
+    "patch-package": "^6.4.7",
+    "postinstall-postinstall": "^2.1.0",
+    "ts-node": "^9.1.1",
+    "typescript": "^4.2.4"
+  },
+  "devDependencies": {
+    "ganache-cli": "6.11.0-tezos.0",
+    "truffle": "5.5.0-tezos.4"
+  },
+  "scripts": {
+    "postinstall": "patch-package",
+    "clean": "rm -rf ./build",
+    "migrate": "yarn clean && yarn truffle migrate",
+    "migrate-florencenet": "yarn migrate --network florencenet",
+    "migrate-florencenet-reset": "yarn migrate --network florencenet --reset",
+    "compile": "yarn clean && yarn truffle compile",
+    "test": "yarn compile && yarn truffle test --bail --network test",
+    "start-sandbox": "docker run --rm --name my-sandbox -e flextesa_node_cors_origin='*' --detach -p 8732:20000 tqtezos/flextesa:20210316 flobox start"
+  },
+  "author": "<gromfighter@gmail.com>",
+  "license": "MIT"
+}
