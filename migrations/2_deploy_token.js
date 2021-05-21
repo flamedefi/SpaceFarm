@@ -9,7 +9,7 @@ module.exports = async (deployer, _network, accounts) => {
 
   const totalSupply = "310000000000000";
   const paused = false;
-  const admin = "tz1YtUbTURpWeX1CzHFamxS7fGdaKwKKgMzq";
+  const admin = "tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb";
   const minters = [];
   const metadata = MichelsonMap.fromLiteral({
     "": Buffer("tezos-storage:flame", "ascii").toString("hex"),
@@ -30,7 +30,7 @@ module.exports = async (deployer, _network, accounts) => {
     ).toString("hex"),
   });
   const ledger = MichelsonMap.fromLiteral({
-    ["tz1YtUbTURpWeX1CzHFamxS7fGdaKwKKgMzq"]: {
+    ["tz1VSUr8wwNhLAzempoch5d6hLRiTh8Cjcjb"]: {
       balance: totalSupply,
       allowances: [],
     },
