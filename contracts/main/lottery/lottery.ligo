@@ -7,6 +7,8 @@ type lottery_config is record [
   jackpot_distribution:   map (nat * nat, nat); //distribution of random numbers against the jackpot part taken for prize (in percent). e.g. [(1, 1978379) -> 0, (1978380, 2400779) -> 5]
   jackpot_share:          nat; // share of bet going to jackpot, e.g. 20
   bankroll_limit:         nat; // bankroll threshold causing the excess to be burnt
+  min_bet:                nat; // minimum bet amount
+  max_bet:                nat; // maximum bet amount
 ]
 
 type random_response is record [
@@ -14,17 +16,19 @@ type random_response is record [
   player:   address;
   bet:      nat;
   bet_idx:  nat;
-  timstamp: nat;
+  timestamp: nat;
 ]
 
 type storage is record [
-  admin:    address;
-  oracle:   address;
-  token:    address;
-  bankroll: nat;
-  jackpot:  nat;
-  config:   lottery_config;
-  pending_bets: big_map(address, list(nat));
+  admin:                address;
+  oracle:               address;
+  token:                address;
+  bankroll:             nat;
+  jackpot:              nat;
+  config:               lottery_config;
+  pending_bets:         big_map(address, list(nat));
+  pending_bet_players:  set(address);
+  games_count:          nat;
 ]
 
 type action is
@@ -38,6 +42,11 @@ type action is
 
 function bet(const bet_amount: nat; var s: storage): list(operation) * storage is
   block {
+    if bet_amount < s.config.min_bet or bet_amount > s.config.max_bet then
+      failwith("SF_INVALID_BET");
+    else
+      skip;
+
     const jackpot_share : nat = bet_amount * s.config.jackpot_share / 100n;
     s.jackpot := s.jackpot + jackpot_share;
     const bankroll_share : nat = abs(bet_amount - jackpot_share);
@@ -60,6 +69,7 @@ function bet(const bet_amount: nat; var s: storage): list(operation) * storage i
     | Some(b) -> s.pending_bets[Tezos.sender] := bet_amount # b
     | None -> s.pending_bets[Tezos.sender] := list [bet_amount]
     end;
+    s.pending_bet_players := Set.add(Tezos.sender, s.pending_bet_players);
     for op in list call_transfer_op(record [token = s.token; from_addr = Tezos.sender; to_addr = Tezos.self_address; amount = bet_amount]) block {
         ops:= op # ops;
     }
@@ -91,6 +101,28 @@ function update_config(const new_config: lottery_config; var s: storage): storag
       s.config := new_config
   } with(s)
 
+function calculate_bankroll_share(const response: random_response; var s: storage): nat is
+  block {
+    var bankroll_share := 0n;
+    for range -> multiplier in map s.config.bankroll_distribution block {
+      if (response.random >= range.0 and response.random < range.1) then
+        bankroll_share := response.bet * multiplier;
+      else
+        skip;
+    };
+  } with (bankroll_share)
+
+function calculate_jackpot_share(const response: random_response; var s: storage): nat is
+  block {
+    var jackpot_share := 0n;
+    for range -> multiplier in map s.config.jackpot_distribution block {
+      if (response.random >= range.0 and response.random < range.1) then
+        jackpot_share := abs(response.bet * int(multiplier) / 100);
+      else
+        skip;
+    };
+  } with(jackpot_share)
+
 function obtain_random(const random: list(random_response); var s: storage): list(operation) * storage is
   block {
     if Tezos.sender =/= s.oracle then
@@ -98,21 +130,10 @@ function obtain_random(const random: list(random_response); var s: storage): lis
     else
       skip;
     var ops: list( operation ) := nil;
+    var _indices: map (address, nat) := map [];
     for response in list random block {
-      var bankroll_share := 0n;
-      var jackpot_share := 0n;
-      for range -> multiplier in map s.config.bankroll_distribution block {
-        if (response.random >= range.0 and response.random < range.1) then
-          bankroll_share := response.bet * multiplier;
-        else
-          skip;
-      };
-      for range -> multiplier in map s.config.jackpot_distribution block {
-        if (response.random >= range.0 and response.random < range.1) then
-          jackpot_share := abs(response.bet * int(multiplier) / 100);
-        else
-          skip;
-      };
+      var bankroll_share := calculate_bankroll_share(response, s);
+      var jackpot_share := calculate_jackpot_share(response, s);
       const payout : nat = bankroll_share + jackpot_share;
       if (payout > 0n) then block {
         for op in list call_transfer_op(record [token = s.token; from_addr = Tezos.self_address; to_addr = response.player; amount = payout]) block {
@@ -121,25 +142,34 @@ function obtain_random(const random: list(random_response); var s: storage): lis
         s.bankroll := abs(s.bankroll - bankroll_share);
         s.jackpot := abs(s.jackpot - jackpot_share);
       } else skip;
+
       var new_pb : list(nat) := nil;
-      var _pb_idx : nat := 0n;
+      var pb_idx : nat := case _indices[response.player] of
+      | Some(idx) -> idx
+      | None -> 0n
+      end;
       var old_pb : list(nat) := case s.pending_bets[response.player] of
       | Some(b) -> b
       | None -> nil
       end;
       for pb in list old_pb block {
-        if (response.bet_idx =/= _pb_idx) then block {
+        var idx : nat := case _indices[response.player] of
+        | Some(idx) -> idx
+        | None -> 0n
+        end;
+        if (response.bet_idx =/= idx) then block {
           new_pb := pb # new_pb;
         } else {
-          skip;
+          _indices[response.player] := pb_idx + 1n;
         };
-        _pb_idx := _pb_idx + 1n;
       };
       if (List.size(new_pb) = 0n) then block {
           remove response.player from map s.pending_bets;
+          s.pending_bet_players := Set.remove(response.player, s.pending_bet_players);
       } else {
           s.pending_bets[response.player] := new_pb;
-      }
+      };
+      s.games_count := s.games_count + 1n;
     }
   } with(ops, s)
 
